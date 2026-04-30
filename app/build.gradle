@@ -21,6 +21,12 @@ android {
 
     productFlavors {
         /* Note: alphabetical order determines the default flavor, which is standard */
+        headless {
+            dimension "type"
+            applicationIdSuffix ".headless"
+            versionNameSuffix "-headless"
+        }
+
         standard {
             dimension "type"
         }

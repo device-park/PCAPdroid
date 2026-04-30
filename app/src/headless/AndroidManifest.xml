@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Headless APK - GUI Yok, Sadece Servis -->
+    <!-- ADB Broadcast ile kontrol edilir -->
+
+    <application
+        android:name="com.emanuelef.remote_capture.PCAPdroid"
+        android:icon="@mipmap/ic_launcher"
+        android:label="PCAPdroid Headless"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/AppTheme"
+        android:allowBackup="true"
+        tools:replace="android:label,android:theme"
+        tools:targetApi="tiramisu">
+
+        <!-- Ana manifest'ten gelen MainActivity'yi kaldır -->
+        <!-- Launcher'da görünmemesi için -->
+        <activity
+            android:name=".activities.MainActivity"
+            tools:node="remove" />
+
+        <!-- VPN Permission Activity - Sadece permission almak için -->
+        <!-- Launcher'da görünmez, BroadcastReceiver açar -->
+        <activity
+            android:name="com.emanuelef.remote_capture.VpnPermissionActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:exported="true" />
+
+        <!-- PURE SERVICE - GUI YOK! -->
+        <!-- Broadcast Receiver ile kontrol -->
+        <receiver
+            android:name="com.emanuelef.remote_capture.CaptureControlReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.emanuelef.remote_capture.START_CAPTURE" />
+                <action android:name="com.emanuelef.remote_capture.STOP_CAPTURE" />
+                <action android:name="com.emanuelef.remote_capture.GET_STATUS" />
+            </intent-filter>
+        </receiver>
+
+        <!-- VPN Service - Network capture için -->
+        <service
+            android:name="com.emanuelef.remote_capture.CaptureService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="run the VpnService to monitor network traffic"/>
+
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
+        <!-- VPN Reconnect Service -->
+        <service
+            android:name="com.emanuelef.remote_capture.VpnReconnectService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="waits for the termination of the active VpnService"/>
+        </service>
+
+        <!-- Broadcast Receivers -->
+        <receiver android:name="com.emanuelef.remote_capture.ActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="com.emanuelef.remote_capture.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- MainActivity'i kaldırdık - GUI yok -->
+        <!-- LAUNCHER intent filter yok - uygulamalar menüsünde görünmez -->
+        
+    </application>
+
+</manifest>
