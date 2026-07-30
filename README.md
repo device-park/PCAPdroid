@@ -1,93 +1,250 @@
-# PCAPdroid
+# PCAPdroid Headless
 
-PCAPdroid is a privacy-friendly open source app which lets you track, analyze and block the connections made by the other apps in your device. It also allows you to export a PCAP dump of the traffic, inspect HTTP, decrypt TLS traffic and much more!
+Network packet capture servisi - GUI yok, sadece ADB kontrolü.
 
-PCAPdroid simulates a VPN in order to capture the network traffic without root. It does not use a remote VPN server, instead data is processed locally on the device.
+Bu repo bir **builder** olarak kullanılır: `build_headless_pcapdroid.sh` çalıştırılır, headless APK üretilir.
 
-<p align="center">
-<img src="https://raw.githubusercontent.com/emanuele-f/PCAPdroid/master/fastlane/metadata/android/en-US/images/phoneScreenshots/1.jpg" width="190" />
-<img src="https://raw.githubusercontent.com/emanuele-f/PCAPdroid/master/fastlane/metadata/android/en-US/images/phoneScreenshots/2.jpg" width="190" />
-</p>
+## 🔨 APK Üretmek
 
-Features:
+```bash
+./build_headless_pcapdroid.sh
+# ==> Tamam: releases/pcapdroid-headless.apk (15M)
+```
 
-- Log and examine the connections made by user and system apps
-- Extract the SNI, DNS query, HTTP URL and the remote IP address
-- Inspect HTTP requests and replies thanks to the built-in decoders
-- Inspect the full connections payload as hexdump/text
-- [Decrypt the HTTPS/TLS traffic](https://emanuele-f.github.io/PCAPdroid/tls_decryption) and export the SSLKEYLOGFILE
-- Dump the traffic to a PCAP file, download it from a browser, or stream it to a remote receiver for real-time analysis (e.g. Wireshark)
-- Create rules to filter out the good traffic and easily spot anomalies
-- Identify the country and ASN of remote server via offline DB lookups
-- On rooted devices, capture the traffic while other VPN apps are running
+Script sırasıyla:
+1. Android SDK'yı bulur (`ANDROID_HOME` set değilse `~/Library/Android/sdk` ve Homebrew yollarına bakar)
+2. Native kod submodule'leri eksikse `git submodule update --init --recursive` çalıştırır
+3. `./gradlew assembleHeadlessDebug` çalıştırır
+4. Çıktıyı `releases/pcapdroid-headless.apk` olarak kopyalar
 
-Paid features:
+### Gereksinimler
 
-- [Firewall](https://emanuele-f.github.io/PCAPdroid/paid_features#51-firewall): create rules to block individual apps, domains and IP addresses
-- [Malware detection](https://emanuele-f.github.io/PCAPdroid/paid_features#52-malware-detection): detect malicious connections by using third-party blacklists
-- [PCAPng format](https://emanuele-f.github.io/PCAPdroid/paid_features#53-pcapng-format): makes it easier to export and analyze decrypted traffic
+| | |
+|---|---|
+| JDK | 17 |
+| Android SDK | compileSdk 35 |
+| NDK | 28.2.13676358 |
+| CMake | 3.22.1 |
 
-If you plan to use PCAPdroid to perform packet analysis, please check out <a href='https://emanuele-f.github.io/PCAPdroid/quick_start#14-packet-analysis'>the specific section</a> of the manual.
+Repo `--recursive` klonlanmalı (6 submodule native kod içeriyor):
 
-<a href="https://f-droid.org/packages/com.emanuelef.remote_capture">
-    <img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
-    alt="Get it on F-Droid"
-    height="80">
-</a> <a href='https://play.google.com/store/apps/details?id=com.emanuelef.remote_capture'><img height="80" alt='Get it on Google Play' src='https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png'/></a>
+```bash
+git clone --recursive git@github.com:device-park/device-park-pcapdroid-android-app.git
+```
 
-You can test the latest features before the official release by adding the [Beta repository](https://pcapdroid.org/fdroid/repo/) to the F-Droid app.
+> Submodule'ler repo'da gitlink olarak kayıtlıdır (`.gitmodules`), içerikleri repo'ya
+> dahil değildir. `--recursive` unutulursa script `git submodule update --init --recursive`
+> çalıştırarak kendisi çeker; bunun için `.git` dizini ve internet erişimi gerekir.
 
-## User Guide
+### Üretilen APK
 
-Check out the [quick start instructions](https://emanuele-f.github.io/PCAPdroid/quick_start) or the full [User Guide](https://emanuele-f.github.io/PCAPdroid).
+| | |
+|---|---|
+| Paket | `com.emanuelef.remote_capture.headless.debug` |
+| versionName | `1.9.1-headless-beta` |
+| Boyut | ~15 MB |
+| ABI | arm64-v8a, armeabi-v7a, x86, x86_64 |
+| İmza | debug keystore (`~/.android/debug.keystore`) |
+| Launcher | görünmez (headless) |
 
-## Sponsors
+## 🐳 Docker ile Build
 
-The PCAPdroid project is sponsored by [AVEQ GmbH](https://aveq.info).
+### Gereksinimler
 
-If you want to sponsor this project [drop me an email](mailto:black.silver@hotmail.it?subject=PCAPdroid%20sponsorship).
+| | |
+|---|---|
+| Mimari | **linux/amd64** — Android NDK ve `aapt2` için Linux ARM64 host binary'leri yok. Apple Silicon'da `--platform=linux/amd64` (emülasyon, build ~3-4x yavaşlar) |
+| Base image | JDK 17 (`eclipse-temurin:17-jdk`) |
+| Paketler | `git`, `curl`, `unzip` (submodule çekme + SDK kurulumu için) |
+| SDK bileşenleri | `platform-tools`, `platforms;android-35`, `build-tools;35.0.0`, `ndk;28.2.13676358`, `cmake;3.22.1` |
+| Disk | ~8 GB (NDK tek başına 2.8 GB) + gradle cache için ~2 GB |
+| RAM | 4 GB+ (gradle daemon + 4 ABI için native derleme) |
+| Ağ | Gradle 9.2.1 wrapper, bağımlılıklar ve submodule'ler build sırasında indirilir |
 
-## Community
+### Örnek Dockerfile
 
-You can help the PCAPdroid project in many ways:
+```dockerfile
+FROM --platform=linux/amd64 eclipse-temurin:17-jdk
 
-- [Make a donation](https://emanuele-f.github.io/PCAPdroid/donate)
-- Translate the app on [Weblate](https://hosted.weblate.org/engage/pcapdroid/)
-<a href="https://hosted.weblate.org/engage/pcapdroid/">
-  <img src="https://hosted.weblate.org/widgets/pcapdroid/-/app/multi-auto.svg" alt="Translation status" />
-</a>
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git curl unzip && rm -rf /var/lib/apt/lists/*
 
-- [Discuss](https://github.com/emanuele-f/PCAPdroid/discussions) new features
-- Improve the app theme and layout
-- Star the project on Github and on [Google Play](https://play.google.com/store/apps/details?id=com.emanuelef.remote_capture)
-- Of course provide code pull requests!
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools"
 
-Join the international PCAPdroid community [on Telegram](https://t.me/PCAPdroid) or [on Matrix](https://matrix.to/#/#pcapdroid:matrix.org).
+# cmdline-tools (guncel surum: https://developer.android.com/studio#command-tools)
+RUN mkdir -p "$ANDROID_HOME/cmdline-tools" && \
+    curl -sSLo /tmp/tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip && \
+    unzip -q /tmp/tools.zip -d "$ANDROID_HOME/cmdline-tools" && \
+    mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" && \
+    rm /tmp/tools.zip
 
-## Integrating into your APP
+RUN yes | sdkmanager --licenses > /dev/null && \
+    sdkmanager --install \
+      "platform-tools" \
+      "platforms;android-35" \
+      "build-tools;35.0.0" \
+      "ndk;28.2.13676358" \
+      "cmake;3.22.1"
 
-Some features of PCAPdroid can be integrated into a third-party app to provide packet capture capabilities.
+WORKDIR /src
+CMD ["./build_headless_pcapdroid.sh"]
+```
 
-- For rooted devices, the [pcapd daemon](https://github.com/emanuele-f/PCAPdroid/tree/master/app/src/main/jni/pcapd) can be directly integrated into your APK to capture network packets.
-- For all the devices, PCAPdroid [exposes an API](https://github.com/emanuele-f/PCAPdroid/blob/master/docs/app_api.md) to control the packet capture and send the captured packets via UDP to your app. This requires to install PCAPdroid along with your app.
+### Kullanım
 
-## Open Source
+```bash
+docker build --platform=linux/amd64 -t pcapdroid-builder .
 
-PCAPdroid is powered by open source technologies.
+docker run --rm --platform=linux/amd64 \
+  -v "$PWD":/src \
+  -v pcapdroid-gradle:/root/.gradle \
+  -v "$HOME/.android":/root/.android \
+  pcapdroid-builder
+# APK: releases/pcapdroid-headless.apk
+```
 
-- [nDPI](https://github.com/ntop/nDPI): deep packet inspection library, provides the connections metadata
-- [mitmproxy](https://github.com/mitmproxy/mitmproxy): a local proxy for the TLS decryption
-- [zdtun](https://github.com/emanuele-f/zdtun): minimal TCP/IP stack for the non-root capture
+> **Keystore uyarısı:** debug APK, `~/.android/debug.keystore` ile imzalanır. Bu dosya
+> container içinde yoksa Gradle her build'de **yeni** bir keystore üretir; imza
+> değiştiği için cihazdaki eski sürümün üzerine `adb install -r` yapılamaz
+> (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). Yukarıdaki gibi kalıcı bir `.android`
+> dizini mount edin veya sabit bir keystore'u imaja koyun.
 
-For the complete list of third party libraries check out the "About" page in the app.
+> **`.git` gerekli:** submodule'ler build sırasında `git submodule update --init`
+> ile çekildiği için repo'yu mount ederken `.git` dizini de gelmelidir. Alternatif
+> olarak submodule'leri host'ta çekip öyle mount edin.
 
-## Building
+### CI (GitHub Actions) notu
 
-1. On Windows, install [gitforwindows](https://gitforwindows.org)
-2. Clone this repo
-3. Inside the repo dir, run `git submodule update --init`. The `submodules` directory should get populated.
-4. Open the project in Android Studio, install the appropriate SDK and the NDK
-5. Build the app
+Submodule'lerin CI'da eksik olması sorun değil; checkout adımı çeker:
 
-*Note*: If you get "No valid CMake executable was found", be sure to install the CMake version used by PCAPdroid (currently [3.22.1](https://github.com/emanuele-f/PCAPdroid/blob/master/app/build.gradle)) from the SDK manager
+```yaml
+- uses: actions/checkout@v4
+  with:
+    submodules: recursive
+```
 
+Bu satır olmasa bile script `git submodule update --init --recursive` ile kendisi
+çeker. Runner'da NDK/CMake sürümleri hazır gelmediği için build'den önce kurulmalıdır:
+
+```yaml
+- run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358" "cmake;3.22.1"
+- run: ./build_headless_pcapdroid.sh
+```
+
+## 🚀 Hızlı Başlangıç
+
+```bash
+# 1. APK'yı kur
+adb install -r releases/pcapdroid-headless.apk
+
+# 2. VPN izni ver (ilk seferinde - telefonda "Tamam"a bas)
+./HEADLESS_KOMUTLAR.sh grant
+
+# 3. Capture başlat
+./HEADLESS_KOMUTLAR.sh start-file
+
+# 4. Instagram kullan (trafik üret)
+
+# 5. Durdur ve PCAP çek
+./HEADLESS_KOMUTLAR.sh stop
+./HEADLESS_KOMUTLAR.sh pull
+```
+
+## 📋 Özellikler
+
+- ✅ Headless (launcher'da görünmez)
+- ✅ ADB broadcast kontrolü
+- ✅ Static API key (her cihazda aynı)
+- ✅ App-specific filtering (örn: sadece Instagram)
+- ✅ Hızlı PCAP indirme (adb pull)
+- ✅ VPN izni (bir kere)
+- ✅ 15MB APK boyutu
+- ✅ Root **gerekli değil**
+
+## 🎯 Tüm Komutlar
+
+```bash
+./HEADLESS_KOMUTLAR.sh grant         # VPN izni ver
+./HEADLESS_KOMUTLAR.sh start-file    # Capture başlat (dosya)
+./HEADLESS_KOMUTLAR.sh start         # Capture başlat (HTTP)
+./HEADLESS_KOMUTLAR.sh stop          # Durdur
+./HEADLESS_KOMUTLAR.sh pull          # PCAP çek (hızlı)
+./HEADLESS_KOMUTLAR.sh download      # PCAP indir (HTTP - yavaş)
+./HEADLESS_KOMUTLAR.sh status        # Durum kontrol
+./HEADLESS_KOMUTLAR.sh logs          # Logları göster
+./HEADLESS_KOMUTLAR.sh app <pkg>     # Belirli app capture et
+```
+
+## ⚙️ Yapılandırma
+
+`HEADLESS_KOMUTLAR.sh` dosyasını düzenleyin:
+
+```bash
+# Paket adı (build çıktısıyla eşleşmeli)
+PKG="com.emanuelef.remote_capture.headless.debug"
+
+# Target app (boş = tüm uygulamalar)
+TARGET_APP="com.instagram.android"
+
+# API Key
+API_KEY="PCAPdroid-2024-Static-Key-12345"
+```
+
+## 📦 Değişiklikler
+
+### Kod Değişiklikleri
+1. `Prefs.java` - Static API key eklendi
+2. `CaptureControlReceiver.java` - Broadcast receiver oluşturuldu
+3. `VpnPermissionActivity.java` - VPN permission yönetimi
+4. `app/src/headless/AndroidManifest.xml` - Headless variant
+5. `app/build.gradle` - Headless flavor eklendi
+
+### Build Flavors
+- **headless**: GUI yok, sadece service
+- **standard**: Orijinal uygulama
+- **withoutUshark**: uShark olmadan
+
+## 🐛 Sorun Giderme
+
+**Build "SDK location not found" diyor:**
+```bash
+export ANDROID_HOME=/path/to/android/sdk
+./build_headless_pcapdroid.sh
+```
+
+**Build "submodules/zdtun does not contain a CMakeLists.txt" diyor:**
+Submodule dizinleri boş değil ama git submodule değil (içlerinde artık dosyalar
+var). Dizinleri temizleyip tekrar deneyin:
+```bash
+git submodule update --init --recursive
+```
+
+**VPN izni gelmiyor:**
+```bash
+./HEADLESS_KOMUTLAR.sh grant
+# Telefonda "Tamam" tıklayın
+```
+
+**Capture başlamıyor:**
+```bash
+./HEADLESS_KOMUTLAR.sh logs
+```
+
+**PCAP boş:**
+Hedef uygulamayı kullanın (trafik üretin) ve VPN'in aktif olduğunu kontrol edin
+(Ayarlar > VPN). `TARGET_APP` filtresi yanlış paket adı içeriyorsa da PCAP boş kalır.
+
+## 📝 Notlar
+
+- İlk kullanımda VPN permission dialog açılır, sonraki kullanımlarda otomatik başlar
+- APK launcher'da görünmez, sadece ADB ile kontrol edilir
+- `pull` komutu dosya yolunu `/tmp/pcapdroid_current.txt`'ten okur, bu yüzden
+  `start-file` ile aynı makineden çalıştırılmalıdır
+
+## 🔗 Orijinal Proje
+
+[PCAPdroid](https://github.com/emanuele-f/PCAPdroid) - Emanuele Faranda
+
+Bu repo PCAPdroid'in headless bir varyantıdır. Orijinal proje gibi **GPL-3.0**
+lisanslıdır, lisans metni için `COPYING` dosyasına bakın.

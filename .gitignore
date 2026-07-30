@@ -22,5 +22,11 @@ app/standard/
 app/withoutUshark/
 keystore
 
+
+# Headless build ciktilari
+/releases/
+*.pcap
+
+
 # Python
 __pycache__
