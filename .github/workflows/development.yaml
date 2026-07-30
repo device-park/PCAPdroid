@@ -3,7 +3,7 @@ name: Build PCAPdroid Headless APK
 on:
   push:
     branches:
-      - TLT-4693
+      - dev
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
