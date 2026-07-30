@@ -5,14 +5,15 @@ on:
     branches:
       - TLT-4693
 
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  DEVICEPARK_URL: https://dev-devicepark.testinium.io
+
 jobs:
   build:
-
     runs-on: ubuntu-24.04
 
     steps:
@@ -53,9 +54,86 @@ jobs:
           ls -lh releases
           test -f releases/pcapdroid-headless.apk
 
-      - name: Upload APK
+      - name: Generate Pipeline Version
+        id: version
+        run: |
+          BASE_VERSION="1.0"
+          BUILD_NUMBER="${{ github.run_number }}"
+          FULL_VERSION="${BASE_VERSION}.${BUILD_NUMBER}"
+
+          echo "Generated Pipeline Version : ${FULL_VERSION}"
+          echo "Generated Build Number     : ${BUILD_NUMBER}"
+
+          echo "version=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Get OAuth Token
+        env:
+          CLIENT_ID: ${{ secrets.DEVICEPARK_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.DEVICEPARK_CLIENT_SECRET }}
+          AUTH_URL: ${{ env.DEVICEPARK_URL }}/uaa/oauth2/token
+        run: |
+          set -euo pipefail
+
+          TOKEN=$(curl \
+            --silent \
+            --show-error \
+            --fail \
+            --request POST \
+            "$AUTH_URL" \
+            --user "${CLIENT_ID}:${CLIENT_SECRET}" \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=client_credentials" \
+            --data-urlencode "scope=openid" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "Failed to obtain OAuth token"
+            exit 1
+          fi
+
+          echo "::add-mask::$TOKEN"
+          echo "DEVICEPARK_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Upload APK to DevicePark
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          APK="releases/pcapdroid-headless.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "APK not found: $APK"
+            exit 1
+          fi
+
+          if [ -z "${VERSION}" ]; then
+            echo "Application version is empty"
+            exit 1
+          fi
+
+          if [ -z "${DEVICEPARK_TOKEN:-}" ]; then
+            echo "OAuth token is empty"
+            exit 1
+          fi
+
+          echo "Uploading PCAP APK version: ${VERSION}"
+
+          curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --location \
+            --header "Authorization: Bearer ${DEVICEPARK_TOKEN}" \
+            --form "file=@${APK}" \
+            "${DEVICEPARK_URL}/management/api/v1/private/system-apps/upload?platform=ANDROID&appType=PCAP&appVersion=${VERSION}"
+
+          unset DEVICEPARK_TOKEN
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pcapdroid-headless
+          name: pcapdroid-headless-${{ steps.version.outputs.version }}
           path: releases/pcapdroid-headless.apk
           if-no-files-found: error
