@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DEVICEPARK_URL: https://dev-devicepark.testinium.io
+  DEVICEPARK_URL: https://dev-devicepark-internal.testinium.io
 
 jobs:
   build:
