@@ -1,63 +1,165 @@
 name: Build PCAPdroid Headless APK
 
-
 on:
   push:
     branches:
-      - dev
+      - TLT-4724
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: pcapdroid-on-demand-runner
+  cancel-in-progress: false
 
 env:
-  DEVICEPARK_URL: https://dev-devicepark.testinium.io
+  DEVICEPARK_URL: https://dev-devicepark-internal.testinium.io
+  ANDROID_PLATFORM: 35
+  ANDROID_BUILD_TOOLS: 35.0.0
+  ANDROID_NDK: 28.2.13676358
+  ANDROID_CMAKE: 3.22.1
+  AWS_REGION: eu-west-1
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
+
+  # ============================================================
+  # 1. Start On-Demand EC2 Runner
+  # ============================================================
+  start-runner:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     steps:
+
+      # --------------------------------------------------------
+      # Configure AWS credentials
+      # --------------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # --------------------------------------------------------
+      # Start EC2 runner
+      # --------------------------------------------------------
+      - name: Start EC2 runner
+        run: |
+          set -euo pipefail
+
+          echo "Starting EC2 runner..."
+
+          aws ec2 start-instances \
+            --instance-ids "${{ secrets.RUNNER_INSTANCE_ID }}"
+
+          echo "Waiting for EC2 to be running..."
+
+          aws ec2 wait instance-running \
+            --instance-ids "${{ secrets.RUNNER_INSTANCE_ID }}"
+
+          echo "EC2 instance is running."
+
+  # ============================================================
+  # 2. Build + Upload APK
+  # ============================================================
+  build:
+    needs: start-runner
+
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - devicepark
+
+    steps:
+
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Set up JDK 17
+      # --------------------------------------------------------
+      # Java
+      # --------------------------------------------------------
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
+      # --------------------------------------------------------
+      # Android SDK
+      # --------------------------------------------------------
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      # --------------------------------------------------------
+      # Install Android SDK Components
+      # --------------------------------------------------------
       - name: Install Android SDK Components
         run: |
-          yes | sdkmanager --licenses
+          set -euo pipefail
+
+          echo "Accepting Android SDK licenses..."
+
+          yes | sdkmanager --licenses || true
+
+          echo "Installing Android SDK components..."
 
           sdkmanager \
             "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "ndk;28.2.13676358" \
-            "cmake;3.22.1"
+            "platforms;android-${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK}" \
+            "cmake;${ANDROID_CMAKE}"
 
+          echo "Android SDK components installed."
+
+      # --------------------------------------------------------
+      # Make build script executable
+      # --------------------------------------------------------
       - name: Make build script executable
-        run: chmod +x build_headless_pcapdroid.sh
+        run: |
+          chmod +x build_headless_pcapdroid.sh
 
+      # --------------------------------------------------------
+      # Build Headless APK
+      # --------------------------------------------------------
       - name: Build Headless APK
-        run: ./build_headless_pcapdroid.sh
+        run: |
+          set -euo pipefail
 
+          echo "Building PCAPdroid Headless APK..."
+
+          ./build_headless_pcapdroid.sh
+
+      # --------------------------------------------------------
+      # Verify APK
+      # --------------------------------------------------------
       - name: Verify APK
         run: |
-          ls -lh releases
+          set -euo pipefail
+
+          echo "Checking generated APK..."
+
           test -f releases/pcapdroid-headless.apk
 
+          ls -lh releases/pcapdroid-headless.apk
+
+          echo "APK generated successfully."
+
+      # --------------------------------------------------------
+      # Generate Pipeline Version
+      # --------------------------------------------------------
       - name: Generate Pipeline Version
         id: version
         run: |
+          set -euo pipefail
+
           BASE_VERSION="1.0"
           BUILD_NUMBER="${{ github.run_number }}"
           FULL_VERSION="${BASE_VERSION}.${BUILD_NUMBER}"
@@ -68,13 +170,19 @@ jobs:
           echo "version=${FULL_VERSION}" >> "$GITHUB_OUTPUT"
           echo "build=${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
+      # --------------------------------------------------------
+      # Get OAuth Token
+      # --------------------------------------------------------
       - name: Get OAuth Token
         env:
           CLIENT_ID: ${{ secrets.DEVICEPARK_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.DEVICEPARK_CLIENT_SECRET }}
           AUTH_URL: ${{ env.DEVICEPARK_URL }}/uaa/oauth2/token
+
         run: |
           set -euo pipefail
+
+          echo "Requesting DevicePark OAuth token..."
 
           TOKEN=$(curl \
             --silent \
@@ -86,7 +194,7 @@ jobs:
             --header "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode "grant_type=client_credentials" \
             --data-urlencode "scope=openid" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+            | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
             echo "Failed to obtain OAuth token"
@@ -96,9 +204,15 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "DEVICEPARK_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
+          echo "OAuth token obtained successfully."
+
+      # --------------------------------------------------------
+      # Upload APK to DevicePark
+      # --------------------------------------------------------
       - name: Upload APK to DevicePark
         env:
           VERSION: ${{ steps.version.outputs.version }}
+
         run: |
           set -euo pipefail
 
@@ -130,11 +244,78 @@ jobs:
             --form "file=@${APK}" \
             "${DEVICEPARK_URL}/management/api/v1/private/system-apps/upload?platform=ANDROID&appType=PCAP&appVersion=${VERSION}"
 
+          echo
+          echo "PCAP APK upload completed successfully."
+
           unset DEVICEPARK_TOKEN
 
+      # --------------------------------------------------------
+      # Upload Artifact
+      # --------------------------------------------------------
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: pcapdroid-headless-${{ steps.version.outputs.version }}
           path: releases/pcapdroid-headless.apk
           if-no-files-found: error
+
+      # --------------------------------------------------------
+      # Cleanup Runner
+      # --------------------------------------------------------
+      - name: Cleanup previous build state
+        if: always()
+        run: |
+          set -euo pipefail
+
+          echo "Cleaning previous runner state..."
+
+          rm -rf build
+          rm -rf .gradle
+          rm -rf ~/.gradle/caches
+          rm -rf ~/.gradle/wrapper/dists
+          rm -rf ~/.m2/repository
+          rm -rf ~/.android/cache
+
+          echo "Runner cleanup completed."
+
+  # ============================================================
+  # 3. Stop On-Demand EC2 Runner
+  # ============================================================
+  stop-runner:
+    needs:
+      - start-runner
+      - build
+
+    if: always()
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+
+      # --------------------------------------------------------
+      # Configure AWS credentials
+      # --------------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # --------------------------------------------------------
+      # Stop EC2 runner
+      # --------------------------------------------------------
+      - name: Stop EC2 runner
+        run: |
+          set -euo pipefail
+
+          echo "Stopping EC2 runner..."
+
+          aws ec2 stop-instances \
+            --instance-ids "${{ secrets.RUNNER_INSTANCE_ID }}"
+
+          echo "EC2 stop requested."
