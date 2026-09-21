@@ -1,3 +1,4 @@
+
 name: Build PCAPdroid Headless APK
 
 on:
@@ -11,6 +12,10 @@ concurrency:
 
 env:
   DEVICEPARK_URL: https://devicepark.testinium.io
+  ANDROID_PLATFORM: 35
+  ANDROID_BUILD_TOOLS: 35.0.0
+  ANDROID_NDK: 28.2.13676358
+  ANDROID_CMAKE: 3.22.1
 
 jobs:
   build:
@@ -34,29 +39,58 @@ jobs:
 
       - name: Install Android SDK Components
         run: |
-          yes | sdkmanager --licenses
+          set -euo pipefail
+
+          yes | sdkmanager --licenses >/dev/null || true
 
           sdkmanager \
             "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "ndk;28.2.13676358" \
-            "cmake;3.22.1"
+            "platforms;android-${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK}" \
+            "cmake;${ANDROID_CMAKE}"
+
+      - name: Verify Android SDK
+        run: |
+          set -euo pipefail
+
+          echo "Android SDK verification..."
+
+          sdkmanager --version
+
+          test -d "${ANDROID_HOME}/platform-tools"
+          test -d "${ANDROID_HOME}/platforms/android-${ANDROID_PLATFORM}"
+          test -d "${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS}"
+          test -d "${ANDROID_HOME}/ndk/${ANDROID_NDK}"
+          test -d "${ANDROID_HOME}/cmake/${ANDROID_CMAKE}"
+
+          echo "Android SDK components are ready."
 
       - name: Make build script executable
-        run: chmod +x build_headless_pcapdroid.sh
+        run: |
+          chmod +x build_headless_pcapdroid.sh
 
       - name: Build Headless APK
-        run: ./build_headless_pcapdroid.sh
+        run: |
+          set -euo pipefail
+
+          ./build_headless_pcapdroid.sh
 
       - name: Verify APK
         run: |
+          set -euo pipefail
+
           ls -lh releases
+
           test -f releases/pcapdroid-headless.apk
+
+          echo "PCAPdroid APK generated successfully."
 
       - name: Extract Tag Version
         id: version
         run: |
+          set -euo pipefail
+
           RAW_TAG="${{ github.ref_name }}"
 
           VERSION="${RAW_TAG#v}"
@@ -75,6 +109,7 @@ jobs:
           CLIENT_ID: ${{ secrets.DEVICEPARK_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.DEVICEPARK_CLIENT_SECRET }}
           AUTH_URL: ${{ env.DEVICEPARK_URL }}/uaa/oauth2/token
+
         run: |
           set -euo pipefail
 
@@ -98,9 +133,10 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "DEVICEPARK_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
-      - name: Upload APK to DevicePark
+      - name: Upload APK to DevicePark Prod
         env:
           VERSION: ${{ steps.version.outputs.version }}
+
         run: |
           set -euo pipefail
 
@@ -121,7 +157,7 @@ jobs:
             exit 1
           fi
 
-          echo "Uploading PCAP APK version: ${VERSION}"
+          echo "Uploading PCAP APK version: ${VERSION} to PROD"
 
           curl \
             --silent \
@@ -132,11 +168,15 @@ jobs:
             --form "file=@${APK}" \
             "${DEVICEPARK_URL}/management/api/v1/private/system-apps/upload?platform=ANDROID&appType=PCAP&appVersion=${VERSION}"
 
+          echo
+          echo "Upload completed successfully."
+
           unset DEVICEPARK_TOKEN
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pcapdroid-headless-${{ steps.version.outputs.version }}
+          name: pcapdroid-headless-prod-${{ steps.version.outputs.version }}
           path: releases/pcapdroid-headless.apk
           if-no-files-found: error
+
